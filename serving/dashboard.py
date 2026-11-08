@@ -1,23 +1,9 @@
 import logging
 from collections import Counter
 
+from serving import geo
+
 logger = logging.getLogger(__name__)
-
-
-def is_private(ip: str) -> bool:
-    """Vrai pour les adresses du réseau interne (10.x, 192.168.x, 172.16-31.x, 127.x)."""
-    try:
-        a, b = (int(x) for x in ip.split(".")[:2])
-    except ValueError:
-        return False
-    return a in (10, 127) or (a == 192 and b == 168) or (a == 172 and 16 <= b <= 31)
-
-
-def get_country(ip: str) -> str:
-    # À compléter selon la source de pays donnée par ton prof
-    if is_private(ip):
-        return "Réseau local"
-    return "Inconnu"
 
 
 def build_dashboard(events: list[dict]) -> dict:
@@ -25,9 +11,11 @@ def build_dashboard(events: list[dict]) -> dict:
     success_by_user = Counter()
     invalid_user_failed = Counter()
 
+    countries = geo.resolve_countries(e["ip"] for e in events if e["event"] == "failed")
+
     for e in events:
         if e["event"] == "failed":
-            failed_by_country[get_country(e["ip"])] += 1
+            failed_by_country[countries.get(e["ip"], "Non résolu")] += 1
             if e["invalid_user"]:
                 invalid_user_failed[e["user"] or "(vide)"] += 1
         elif e["event"] == "accepted":
@@ -52,6 +40,7 @@ def show(dashboard: dict) -> None:
         for name, count in dashboard[key].most_common(10):
             print(f"{name:<25} {count}")
 
+
 def show_graphs(dashboard: dict) -> None:
     """Affiche les 3 graphes du dashboard et les sauvegarde en PNG."""
     try:
@@ -61,12 +50,12 @@ def show_graphs(dashboard: dict) -> None:
         return
 
     charts = [
-        ("failed_by_country", "Tentatives échouées par pays"),
+        ("failed_by_country", "Tentatives échouées par pays (top 10)"),
         ("success_by_user", "Tentatives réussies par utilisateur"),
         ("invalid_user_failed", "Tentatives échouées avec invalid user (top 10)"),
     ]
 
-    fig, axes = plt.subplots(len(charts), 1, figsize=(10, 12))
+    fig, axes = plt.subplots(len(charts), 1, figsize=(10, 14))
     for ax, (key, title) in zip(axes, charts):
         items = dashboard[key].most_common(10)
         if not items:
@@ -79,7 +68,7 @@ def show_graphs(dashboard: dict) -> None:
         ax.set_title(title)
         ax.set_xlabel("Nombre de tentatives")
 
-    fig.tight_layout()
+    fig.tight_layout(h_pad=3)
     try:
         fig.savefig("dashboard.png")
         logger.info("Graphes sauvegardés dans dashboard.png")
